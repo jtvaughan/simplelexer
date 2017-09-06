@@ -1,0 +1,329 @@
+Title: SimpleLexer README
+Project: SimpleLexer
+Author: Jordan Vaughan <jordan.t.vaughan@gmail.com>
+Language: en-US
+Created: 2017-09-05
+Last-Modified: 2017-09-05
+Revision: 1.0.0 Jordan Vaughan
+Encoding: UTF-8
+Preferred-Line-Width: 80
+
+Abstract
+
+   This document outlines SimpleLexer, a streaming pull lexer written in C99.
+
+Table of Contents
+
+   1. Introduction
+   2. Goals
+      2.1. Simple Language
+      2.2. Pull Lexer
+      2.3. Zero Memory Allocation
+      2.4. Streaming Capability
+      2.5. Pure C99 Implementation
+      2.6. No External Dependencies
+   3. Installation
+   4. Use
+      4.1. Lexers
+      4.2. Tokens
+      4.3. The Language
+   5. Contributing
+   6. Credits
+   7. License
+   8. Copyright
+
+1.  Introduction
+
+   SimpleLexer is, as the name suggests, a dead-simple lexer
+   suitable for really simple languages.
+
+2.  Goals
+
+2.1.  Simple Language
+
+   All tokens are strings.  Quoting and escaping text are straightforward
+   and unambiguous.  Text is assumed to be validly encoded in US-ASCII
+   or any text encoding compatible with it, such as UTF-8.
+
+2.2.  Pull Lexer
+
+   There are only two functions for getting tokens:
+   SimpleLexer_GetNextToken() and SimpleLexer_Finish()
+   (called to get the last token when a stream is finished).
+   There are no callback functions.
+
+2.3.  Zero Memory Allocation
+
+   The core SimpleLexer functions never allocate, free, or
+   reallocate memory.  Consumers own all of SimpleLexer's buffers.
+   Consequently, the maximum token size is fixed when lexers are
+   initialized, though consumers can expand lexers' token buffers
+   later if necessary.
+
+   That said, there are a couple of convenience functions
+   for duplicating and freeing tokens that use the C standard
+   library's malloc() and free() functions.  Many consumers
+   will find these handy.
+
+2.4.  Streaming Capability
+
+   You can stream text into lexers: Buffering whole files is unnecessary.
+
+2.5.  Pure C99 Implementation
+
+   SimpleLexer is written entirely in C99.
+
+2.6.  No External Dependencies
+
+   SimpleLexer only depends on the standard library.
+
+3.  Installation
+
+   Simply place the simplelexer.h and simplelexer.c files anywhere in
+   your projects and compile with a C99 compiler.  They're meant to be
+   compiled with your projects instead of linked dynamically, though you
+   could certainly do the latter.
+
+   There is a suite of unit tests, simplelexer.test.c, that you can
+   compile and run.  It has no external dependencies.  If you have GCC,
+   you can compile the suite like this:
+
+      $ gcc -o test simplelexer.c simplelexer.test.c
+
+   Run the suite without any arguments:
+
+      $ ./test
+
+   You should see a list of test suites running in sequence.
+   The program should print a summary of passed and failed tests
+   at the end and exit with code 0 if all passed, code 1 if any failed.
+
+   Note that the unit test suite is primitive: Crashes (for example,
+   segmentation faults) will abort the remaining tests.  If the test
+   suite crashes, something is seriously wrong.
+
+4.  Use
+
+4.1.  Lexers
+
+   Creating a lexer is as simple as declaring a SimpleLexer, allocating
+   a buffer for storing token text, and passing both to
+   SimpleLexer_Init():
+
+      SimpleLexer lexer;
+      char tokenBuffer[1024];    /* max token size is 1023 */
+
+      SimpleLexer_Init(&lexer, tokenBuffer, sizeof(tokenBuffer));
+
+   You're responsible for maintaining tokenBuffer: Don't deallocate it
+   until you're done lexing.
+
+   Next, feed strings of text to be lexed to SimpleLexer_GetNextToken().
+   You need to declare and pass an index variable, which the lexer uses
+   to record where it is in a string.  You need to reset this index
+   variable to zero when you change strings.  You also need to declare
+   and pass the SimpleToken that will hold the lexed token.  Example:
+
+      size_t index;
+      char* lineOfText;
+      size_t lineCapacity;
+      ssize_t lineLength;
+      SimpleToken token;
+      SimpleLexerError errorCode;
+
+      /* Lex tokens from standard input. */
+      lineOfText = NULL;
+      lineCapacity = 0;
+      while ((lineLength = getline(&lineOfText, &lineCapacity, stdin))
+         != -1)
+      {
+         /* We're lexing a new line, so we have to reset `index`. */
+         index = 0;
+
+         /* Get tokens from the line until we get a parse error
+            or we finish the line. */
+         while ((errorCode = SimpleLexer_GetNextToken(&lexer, lineOfText,
+            lineLength, &index, &token)) == SIMPLE_LEXER_OK)
+         {
+            /* `token` now holds a lexed token.
+               It's string is the same buffer as `lexer`'s,
+               so don't deallocate it! */
+         }
+
+         /* SimpleLexer_GetNextToken() returns SIMPLE_LEXER_EOF
+            when it reaches the end of `lineOfText`. */
+         if (errorCode != SIMPLE_LEXER_EOF)
+         {
+            /* The text is ill-formed or the current token is too big. */
+         }
+      }
+
+   When you've reached the end of the text stream, finish lexing with
+   SimpleLexer_Finish().  If it returns SIMPLE_LEXER_EOF, then there
+   is neither an end-of-stream error nor a final token.  If it returns
+   SIMPLE_LEXER_OK, it parsed a final token, which is stored in its
+   SimpleToken parameter.  Example:
+
+      errorCode = SimpleLexer_Finish(&lexer, &token);
+      switch (errorCode)
+      {
+      case SIMPLE_LEXER_OK:
+         /* There weren't any end-of-stream errors, but there was a
+            final token, which `token` now contains. */
+         break;
+
+      case SIMPLE_LEXER_EOF:
+         /* There weren't any end-of-stream errors, but there wasn't a
+            final token, either, so `token`'s contents are undefined. */
+         break;
+
+      default:
+         /* The end of the stream is ill-formatted (e.g., a quoted token
+            wasn't closed). */
+      }
+
+   Once a lexer is finished, you can't use it again until you
+   reinitialize it with SimpleLexer_Init().
+
+   Probably the only SimpleLexer field of interest is currentPosition,
+   which is the lexer's position within the stream of text.
+   Check simplelexer.h if you're curious.
+
+4.2.  Tokens
+
+   A SimpleToken contains a string, the string's length (minus the
+   terminating NUL byte), the token's position within its text stream,
+   and a couple of flags indicating whether the token was quoted
+   or started with an escaped character.  Check simplelexer.h
+   for its fields and their meanings.
+
+   The SimpleTokens that SimpleLexer_GetNextToken() and
+   SimpleLexer_Finish() modify use the same token buffer that
+   their lexers use.  Do NOT deallocate it until you're done lexing.
+
+   There are a few functions for copying and destroying SimpleTokens
+   using the standard library's malloc() and free() functions,
+   but you can write your own functions to duplicate SimpleTokens.
+   See SimpleLexer_Copy() and SimpleLexer_Duplicate() in simplelexer.c
+   if you're curious how they work: They're super simple.
+
+4.3.  The Language
+
+   SimpleLexers recognize an extremely simple language.
+   (All strings in these examples should be interpreted as C strings.)
+
+      o  A TOKEN is a string of characters delimited by WHITESPACE
+         or DOUBLE QUOTATION MARKS, the latter of which are
+         QUOTED TOKENS.  WHITESPACE is any ASCII character
+         that causes C's isspace() to return a nonzero value
+         ('\t', '\n', '\v', '\f', '\r', or ' ').  Quoted tokens
+         may contain whitespace.
+
+         o  "" (empty string) yields no tokens.
+
+         o  "token" yields one token: "token".
+
+         o  "token1 token2" yields two tokens:
+            "token1" and "token2".
+
+         o  "\"this is a long token\"" yields one quoted token:
+            "this is a long token".
+
+         o  "\"this is\" three \"tokens\"" yields three tokens:
+            "this is" (quoted), "three" (unquoted),
+            and "tokens" (quoted).
+
+         o  "\ntoken1 \ttoken2\r\n" yields two tokens:
+            "token1" and "token2".
+
+      o  Whitespace need not separate two tokens if one or both of them
+         is quoted.
+
+         o  "\"token1\"token2" yields two tokens:
+            "token1" (quoted) and "token2" (unquoted).
+
+         o  "token1\"token2\"" yields two tokens:
+            "token1" (unquoted) and "token2" (quoted).
+
+         o  "\"token1\"\"token2\"" yields two tokens:
+            "token1" and "token2", both quoted.
+
+      o  A '\n' (newline) character is treated as the end of a line.
+         '\r' does not receive special treatment.
+
+         o  "token1\ntoken2" yields two tokens:
+            "token1" and "token2", both on separate lines.
+
+         o  "token1\r\ntoken2" yields two tokens:
+            "token1\r" and "token2", both on separate lines.
+
+      o  Any character may be escaped by preceding it with a backslash
+         ('\\') character.  The standard single-character C escape
+         sequences '\a', '\b', '\f', '\n', '\r', '\t', and '\v'
+         are replaced with the ASCII characters they signify, just as
+         in C strings.  A backslash character can be escaped by preceding
+         it with another backslash, just as in C strings.
+
+         o  "\\ " yields one token: " " (a single space character).
+
+         o  "\\\"token" yields one token: "\"token", which is unquoted.
+
+         o  "two\\\nlines" yields one token: "two\nlines".
+
+         o  "\\token" yields one token:
+            "\token" (that's '\t' followed by "oken").
+
+         o  "\\jordan" yields one token: "jordan".
+
+      o  A COMMENT starts with an unquoted, unescaped '#' character
+         and proceeds to the end of its line.
+
+            o  "token # This is a comment." yields one token: "token".
+
+            o  "token1# This is a comment.\ntoken2" yields two tokens:
+               "token1" and "token2".
+
+      o  All quoted tokens must be closed by the end of the text stream.
+
+            o  "\"quoted token" produces a
+               SIMPLE_LEXER_UNCLOSED_QUOTED_TOKEN error because the token
+               isn't closed with quotation marks.
+
+      o  An escaping backslash cannot terminate the text stream.
+
+            o  "token \\" yields the token "token", then produces a
+               SIMPLE_LEXER_ESCAPING_EOF error.
+
+5.  Contributions
+
+   Contributions to the library and its unit test suite are welcome.
+   Please send pull requests on GitHub if you'd like to add or
+   fix something.  Please bear in mind that this library is deliberately
+   simple: If you want more advanced functionality (dynamically-resizing
+   token buffers, Unicode parsing, more than simple string tokens, etc.),
+   consider forking and extending the library.  It's licensed with
+   an extremely liberal license, so feel free to copy and hack away!
+
+6.  Credits
+
+   Jordan Vaughan wrote this library and its documentation.
+
+7.  License
+
+   See the LICENSE file for this software's copyright and license.
+   This documentation is licensed differently; see the "Copyright"
+   section below.
+
+8.  Copyright
+
+      ##########
+      ###    ###
+      ##  ##  ##   To the extent possible under law,
+      #  # ##  #   the authors have waived all copyright
+      #  # ##  #   and related and neighboring rights to
+      #  ## #  #   this work.  For more information, please see
+      #  ## #  #   <https://creativecommons.org/publicdomain/zero/1.0/>.
+      ##  ##  ##
+      ###    ###
+      ##########
+
