@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Jordan Vaughan
+ * Copyright (c) 2019 Jordan Vaughan
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -33,8 +33,8 @@
 #include <string.h>
 
 void SimpleLexer_Init(
-    SimpleLexer *restrict lexer,
-    char *restrict tokenBuffer,
+    SimpleLexer* restrict lexer,
+    char* restrict tokenBuffer,
     size_t tokenBufferSize)
 {
     assert(lexer != NULL);
@@ -57,9 +57,13 @@ void SimpleLexer_Init(
     lexer->buffer = tokenBuffer;
     lexer->bufferLength = 0;
     lexer->bufferCapacity = tokenBufferSize;
+
+    lexer->input = NULL;
+    lexer->inputSize = 0;
+    lexer->inputIndex = 0;
 }
 
-static int SimpleLexer_AppendToBuffer(SimpleLexer *lexer, char c)
+static int SimpleLexer_AppendToBuffer(SimpleLexer* lexer, char c)
 {
     assert(lexer != NULL);
     assert(lexer->buffer != NULL);
@@ -74,7 +78,7 @@ static int SimpleLexer_AppendToBuffer(SimpleLexer *lexer, char c)
 }
 
 static void SimpleLexer_StartToken(
-    SimpleLexer *restrict lexer,
+    SimpleLexer* restrict lexer,
     int_fast8_t quoted,
     int_fast8_t startedEscaped)
 {
@@ -92,49 +96,49 @@ static void SimpleLexer_StartToken(
 }
 
 static void SimpleLexer_FinishToken(
-    SimpleLexer *restrict lexer,
-    SimpleToken *restrict token,
+    SimpleLexer* restrict lexer,
+    SimpleToken* restrict outToken,
     char recordCurrentPositionAsEnd)
 {
     assert(lexer != NULL);
     assert(lexer->buffer != NULL);
-    assert(token != NULL);
+    assert(outToken != NULL);
 
     lexer->buffer[lexer->bufferLength] = '\0';
 
-    token->text = lexer->buffer;
-    token->length = lexer->bufferLength;
-    token->span.start = lexer->tokenStart;
-    token->quoted = lexer->tokenIsQuoted;
-    token->startedEscaped = lexer->startedEscaped;
+    outToken->text = lexer->buffer;
+    outToken->length = lexer->bufferLength;
+    outToken->span.start = lexer->tokenStart;
+    outToken->quoted = lexer->tokenIsQuoted;
+    outToken->startedEscaped = lexer->startedEscaped;
 
     lexer->bufferLength = 0;
     lexer->inToken = 0;
 
     if (recordCurrentPositionAsEnd)
     {
-        token->span.end = lexer->currentPosition;
+        outToken->span.end = lexer->currentPosition;
     }
     else if (lexer->currentPosition.column != 1)
     {
-        token->span.end.line = lexer->currentPosition.line;
-        token->span.end.column = lexer->currentPosition.column - 1;
+        outToken->span.end.line = lexer->currentPosition.line;
+        outToken->span.end.column = lexer->currentPosition.column - 1;
     }
     else if (lexer->currentPosition.line > 1)
     {
-        token->span.end.line = lexer->currentPosition.line - 1;
-        token->span.end.column = lexer->numColumnsInPreviousLine;
+        outToken->span.end.line = lexer->currentPosition.line - 1;
+        outToken->span.end.column = lexer->numColumnsInPreviousLine;
     }
     else
     {
-        token->span.end.line = 1;
-        token->span.end.column = 1;
+        outToken->span.end.line = 1;
+        outToken->span.end.column = 1;
     }
 }
 
 int SimpleToken_Copy(
-    const SimpleToken *restrict source,
-    SimpleToken *restrict dest)
+    const SimpleToken* restrict source,
+    SimpleToken* restrict dest)
 {
     assert(source != NULL);
     assert(dest != NULL);
@@ -155,16 +159,16 @@ int SimpleToken_Copy(
     return 0;
 }
 
-void SimpleToken_Destroy(SimpleToken *token)
+void SimpleToken_Destroy(SimpleToken* token)
 {
     assert(token != NULL);
 
     free(token->text);
 }
 
-SimpleToken *SimpleToken_Duplicate(const SimpleToken *source)
+SimpleToken* SimpleToken_Duplicate(const SimpleToken* source)
 {
-    SimpleToken *copy;
+    SimpleToken* copy;
 
     assert(source != NULL);
     assert(source->text != NULL);
@@ -183,7 +187,7 @@ SimpleToken *SimpleToken_Duplicate(const SimpleToken *source)
     return copy;
 }
 
-void SimpleToken_Free(SimpleToken *token)
+void SimpleToken_Free(SimpleToken* token)
 {
     assert(token != NULL);
 
@@ -198,29 +202,38 @@ static inline void SimpleLexer_AdvanceLine(SimpleLexer* lexer)
     lexer->currentPosition.column = 1;
 }
 
+void SimpleLexer_SetInput(
+    SimpleLexer* restrict lexer,
+    const char* restrict text,
+    size_t textSize)
+{
+    assert(lexer != NULL);
+    assert(text != NULL);
+
+    lexer->input = text;
+    lexer->inputSize = textSize;
+    lexer->inputIndex = 0;
+}
+
 SimpleLexerError SimpleLexer_GetNextToken(
-    SimpleLexer *restrict lexer,
-    const char *restrict source,
-    size_t sourceSize,
-    size_t *restrict index,
-    SimpleToken *restrict token)
+    SimpleLexer* restrict lexer,
+    SimpleToken* restrict outToken)
 {
     char c;
     int error;
 
     assert(lexer != NULL);
     assert(lexer->buffer != NULL);
-    assert(source != NULL);
-    assert(index != NULL);
-    assert(token != NULL);
+    assert(outToken != NULL);
 
-    if (lexer->finished || *index >= sourceSize) {
+    if (lexer->finished || lexer->inputIndex >= lexer->inputSize) {
         return SIMPLE_LEXER_EOF;
     }
+    assert(lexer->input != NULL);
 
-    lexer->bufferLength = 0;
-
-    for (c = source[*index]; *index < sourceSize; c = source[++*index])
+    for (c = lexer->input[lexer->inputIndex];
+        lexer->inputIndex < lexer->inputSize;
+        c = lexer->input[++lexer->inputIndex])
     {
         /* c is at position lexer->currentPosition.
            Don't advance lexer->currentPosition until we've consumed c. */
@@ -250,7 +263,7 @@ SimpleLexerError SimpleLexer_GetNextToken(
             }
 
             if (SimpleLexer_AppendToBuffer(lexer, decodedChar)) {
-                SimpleLexer_FinishToken(lexer, token, 0);
+                SimpleLexer_FinishToken(lexer, outToken, 0);
                 return SIMPLE_LEXER_TOKEN_TOO_LARGE;
             }
             lexer->escaping = 0;
@@ -262,15 +275,15 @@ SimpleLexerError SimpleLexer_GetNextToken(
                 if (lexer->tokenIsQuoted)
                 {
                     if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                        SimpleLexer_FinishToken(lexer, token, 0);
+                        SimpleLexer_FinishToken(lexer, outToken, 0);
                         return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                     }
                 }
                 else
                 {
-                    SimpleLexer_FinishToken(lexer, token, 0);
+                    SimpleLexer_FinishToken(lexer, outToken, 0);
                     SimpleLexer_AdvanceLine(lexer);
-                    ++*index;
+                    ++lexer->inputIndex;
                     return SIMPLE_LEXER_OK;
                 }
             }
@@ -282,15 +295,15 @@ SimpleLexerError SimpleLexer_GetNextToken(
                 if (lexer->tokenIsQuoted)
                 {
                     if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                        SimpleLexer_FinishToken(lexer, token, 0);
+                        SimpleLexer_FinishToken(lexer, outToken, 0);
                         return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                     }
                 }
                 else
                 {
-                    SimpleLexer_FinishToken(lexer, token, 0);
+                    SimpleLexer_FinishToken(lexer, outToken, 0);
                     ++lexer->currentPosition.column;
-                    ++*index;
+                    ++lexer->inputIndex;
                     return SIMPLE_LEXER_OK;
                 }
             }
@@ -301,13 +314,13 @@ SimpleLexerError SimpleLexer_GetNextToken(
             {
                 if (lexer->tokenIsQuoted)
                 {
-                    SimpleLexer_FinishToken(lexer, token, 1);
+                    SimpleLexer_FinishToken(lexer, outToken, 1);
                     ++lexer->currentPosition.column;
-                    ++*index;
+                    ++lexer->inputIndex;
                 }
                 else
                 {
-                    SimpleLexer_FinishToken(lexer, token, 0);
+                    SimpleLexer_FinishToken(lexer, outToken, 0);
                 }
                 return SIMPLE_LEXER_OK;
             }
@@ -329,7 +342,7 @@ SimpleLexerError SimpleLexer_GetNextToken(
             if (lexer->inToken && lexer->tokenIsQuoted)
             {
                 if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                    SimpleLexer_FinishToken(lexer, token, 0);
+                    SimpleLexer_FinishToken(lexer, outToken, 0);
                     return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                 }
             }
@@ -338,9 +351,9 @@ SimpleLexerError SimpleLexer_GetNextToken(
                 lexer->inComment = 1;
                 if (lexer->bufferLength != 0)
                 {
-                    SimpleLexer_FinishToken(lexer, token, 0);
+                    SimpleLexer_FinishToken(lexer, outToken, 0);
                     ++lexer->currentPosition.column;
-                    ++*index;
+                    ++lexer->inputIndex;
                     return SIMPLE_LEXER_OK;
                 }
             }
@@ -352,7 +365,7 @@ SimpleLexerError SimpleLexer_GetNextToken(
                 SimpleLexer_StartToken(lexer, 0, 0);
             }
             if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                SimpleLexer_FinishToken(lexer, token, 0);
+                SimpleLexer_FinishToken(lexer, outToken, 0);
                 return SIMPLE_LEXER_TOKEN_TOO_LARGE;
             }
         }
@@ -372,8 +385,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
 }
 
 SimpleLexerError SimpleLexer_Finish(
-    SimpleLexer *restrict lexer,
-    SimpleToken *restrict finalToken)
+    SimpleLexer* restrict lexer,
+    SimpleToken* restrict finalToken)
 {
     int error;
 

@@ -3,14 +3,15 @@ Project: SimpleLexer
 Author: Jordan Vaughan <jordan.t.vaughan@gmail.com>
 Language: en-US
 Created: 2017-09-05
-Last-Modified: 2017-09-05
-Revision: 1.0.0 Jordan Vaughan
+Last-Modified: 2019-08-02
+Revision: 2.0.0 Jordan Vaughan
 Encoding: UTF-8
 Preferred-Line-Width: 80
 
 Abstract
 
-   This document outlines SimpleLexer, a streaming pull lexer written in C99.
+   This document outlines SimpleLexer, a streaming pull lexer
+   written in C99.
 
 Table of Contents
 
@@ -43,7 +44,7 @@ Table of Contents
 
    All tokens are strings.  Quoting and escaping text are straightforward
    and unambiguous.  Text is assumed to be validly encoded in US-ASCII
-   or any text encoding compatible with it, such as UTF-8.
+   or any character encoding compatible with it, such as UTF-8.
 
 2.2.  Pull Lexer
 
@@ -62,7 +63,7 @@ Table of Contents
 
    That said, there are a couple of convenience functions
    for duplicating and freeing tokens that use the C standard
-   library's malloc() and free() functions.  Many consumers
+   library's malloc(3C) and free(3C) functions.  Many consumers
    will find these handy.
 
 2.4.  Streaming Capability
@@ -118,11 +119,13 @@ Table of Contents
    You're responsible for maintaining tokenBuffer: Don't deallocate it
    until you're done lexing.
 
-   Next, feed strings of text to be lexed to SimpleLexer_GetNextToken().
-   You need to declare and pass an index variable, which the lexer uses
-   to record where it is in a string.  You need to reset this index
-   variable to zero when you change strings.  You also need to declare
-   and pass the SimpleToken that will hold the lexed token.  Example:
+   Next, give the lexer a string of text to lex by calling
+   SimpleLexer_SetInput(), then call SimpleLexer_GetNextToken()
+   repeatedly until it returns SIMPLE_LEXER_EOF.  When it returns that,
+   give it another line of text to lex via SimpleLexer_SetInput()
+   and repeat.
+
+   Example:
 
       size_t index;
       char* lineOfText;
@@ -134,16 +137,14 @@ Table of Contents
       /* Lex tokens from standard input. */
       lineOfText = NULL;
       lineCapacity = 0;
-      while ((lineLength = getline(&lineOfText, &lineCapacity, stdin))
-         != -1)
+      while ((lineLength = getline(&lineOfText, &lineCapacity, stdin)) != -1)
       {
-         /* We're lexing a new line, so we have to reset `index`. */
-         index = 0;
+         SimpleLexer_SetInput(&lexer, lineOfText, (size_t)lineLength);
 
          /* Get tokens from the line until we get a parse error
             or we finish the line. */
-         while ((errorCode = SimpleLexer_GetNextToken(&lexer, lineOfText,
-            lineLength, &index, &token)) == SIMPLE_LEXER_OK)
+         while ((errorCode = SimpleLexer_GetNextToken(&lexer, &token))
+            == SIMPLE_LEXER_OK)
          {
             /* `token` now holds a lexed token.
                It's string is the same buffer as `lexer`'s,
@@ -158,11 +159,13 @@ Table of Contents
          }
       }
 
-   When you've reached the end of the text stream, finish lexing with
-   SimpleLexer_Finish().  If it returns SIMPLE_LEXER_EOF, then there
-   is neither an end-of-stream error nor a final token.  If it returns
+   When you've finished lexing your text, call SimpleLexer_Finish().
+   If it returns SIMPLE_LEXER_EOF, then there is neither an
+   end-of-stream error nor a final token.  If it returns
    SIMPLE_LEXER_OK, it parsed a final token, which is stored in its
-   SimpleToken parameter.  Example:
+   SimpleToken parameter.
+
+   Example:
 
       errorCode = SimpleLexer_Finish(&lexer, &token);
       switch (errorCode)
@@ -192,17 +195,17 @@ Table of Contents
 4.2.  Tokens
 
    A SimpleToken contains a string, the string's length (minus the
-   terminating NUL byte), the token's position within its text stream,
+   terminating NUL char), the token's position within its text stream,
    and a couple of flags indicating whether the token was quoted
    or started with an escaped character.  Check simplelexer.h
-   for its fields and their meanings.
+   for its fields and their semantics.
 
    The SimpleTokens that SimpleLexer_GetNextToken() and
-   SimpleLexer_Finish() modify use the same token buffer that
-   their lexers use.  Do NOT deallocate it until you're done lexing.
+   SimpleLexer_Finish() modify use the same token buffers that
+   their lexers use.  Do NOT deallocate them until you're done lexing.
 
    There are a few functions for copying and destroying SimpleTokens
-   using the standard library's malloc() and free() functions,
+   using the standard library's malloc(3C) and free(3C) functions,
    but you can write your own functions to duplicate SimpleTokens.
    See SimpleLexer_Copy() and SimpleLexer_Duplicate() in simplelexer.c
    if you're curious how they work: They're super simple.
@@ -258,17 +261,20 @@ Table of Contents
             "token1\r" and "token2", both on separate lines.
 
       o  Any character may be escaped by preceding it with a backslash
-         ('\\') character.  The standard single-character C escape
-         sequences '\a', '\b', '\f', '\n', '\r', '\t', and '\v'
-         are replaced with the ASCII characters they signify, just as
-         in C strings.  A backslash character can be escaped by preceding
-         it with another backslash, just as in C strings.
+         ('\\') character, including newlines.  The standard
+         single-character C escape sequences '\a', '\b', '\f', '\n',
+         '\r', '\t', and '\v' are replaced with the ASCII characters
+         they signify, just as in C strings.  A backslash character
+         can be escaped by preceding it with another backslash,
+         just as in C strings.
 
          o  "\\ " yields one token: " " (a single space character).
 
          o  "\\\"token" yields one token: "\"token", which is unquoted.
 
          o  "two\\\nlines" yields one token: "two\nlines".
+
+         o  "two\\nlines" yields one token: "two\nlines".
 
          o  "\\token" yields one token:
             "\token" (that's '\t' followed by "oken").

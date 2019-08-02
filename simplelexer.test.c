@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Jordan Vaughan
+ * Copyright (c) 2019 Jordan Vaughan
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -73,13 +73,14 @@ static char defaultBuffer[1024];
         } \
     } while (0)
 
-#define TEST_GET_TOKEN(input, inputSize, expectedResult) TEST_ASSERT_EQUAL(SimpleLexer_GetNextToken(&lexer, input, inputSize, &idx, &token), expectedResult)
+#define TEST_GET_TOKEN(expectedResult) TEST_ASSERT_EQUAL(SimpleLexer_GetNextToken(&lexer, &token), expectedResult)
 #define TEST_FINISH(expectedResult) TEST_ASSERT_EQUAL(SimpleLexer_Finish(&lexer, &token), expectedResult)
 #define TEST_SPAN(startline, startcol, endline, endcol) TEST_ASSERT_SPAN_EQUAL(token.span, startline, startcol, endline, endcol)
 
-static int TestSimpleLexer_Empty()
+static int EmptyInputYieldsEofAndNoTokens()
 {
-    TEST_GET_TOKEN("", 0, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, "", 0);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_ASSERT_EQUAL(token.text, NULL);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_EQUAL(token.text, NULL);
@@ -88,12 +89,13 @@ static int TestSimpleLexer_Empty()
     return 0;
 }
 
-static int TestSimpleLexer_OneUnquotedToken()
+static int OneUnquotedToken()
 {
     const char *input = "token";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_ASSERT_EQUAL(token.text, NULL);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, input);
@@ -104,42 +106,224 @@ static int TestSimpleLexer_OneUnquotedToken()
     return 0;
 }
 
-static int TestSimpleLexer_LexAfterFinishReturnsEof()
+static int LexAfterFinishReturnsEof()
 {
     const char *input = "token";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
-    idx = 0;
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
 
     return 0;
 }
 
-static int TestSimpleLexer_FinishAfterFinishReturnsEof()
+static int SettingNewInputAfterFinishMakesLexReturnEof()
 {
     const char *input = "token";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
+    TEST_FINISH(SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
+
+    return 0;
+}
+
+static int FinishAfterFinishReturnsEof()
+{
+    const char *input = "token";
+    const size_t len = strlen(input);
+
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_FINISH(SIMPLE_LEXER_EOF);
 
     return 0;
 }
 
-static int TestSimpleLexer_TwoUnquotedTokens()
+static int SettingTwoDifferentInputsUsesTheSecondInput()
 {
-    const char *input = "token1 token2";
-    const size_t len = strlen(input);
+    const char *input1 = "token1";
+    const char *input2 = "token2";
+    const size_t len = strlen(input1);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input1, len);
+    SimpleLexer_SetInput(&lexer, input2, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
+    TEST_FINISH(SIMPLE_LEXER_OK);
+
+    TEST_ASSERT_STREQ(token.text, input2);
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 6);
+    return 0;
+}
+
+static int SettingInputAfterParsingPartOfAnotherDiscardsUnusedInput()
+{
+    const char *input1 = "token11 token12";
+    const char *input2 = "token21 token22";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+
+    TEST_ASSERT_STREQ(token.text, "token21");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    return 0;
+}
+
+static int ParserStaysAtCurrentLineAndColumnAfterSettingInput()
+{
+    const char *input1 = "token11 token12";
+    const char *input2 = "token21 token22";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+
+    TEST_SPAN(1, 9, 1, 15);
+    return 0;
+}
+
+static int UnquotedTextAtEofPrefixesTextOfNextInput()
+{
+    const char* input1 = "prefix";
+    const char* input2 = "suffix token";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "prefixsuffix");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 12);
+    return 0;
+}
+
+static int QuotedTextAtEofPrefixesTextOfNextInput()
+{
+    const char* input1 = "\"prefix ";
+    const char* input2 = " suffix\" token";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "prefix  suffix");
+    TEST_ASSERT_EQUAL(token.quoted, 1);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 16);
+    return 0;
+}
+
+static int TextAtEofThatStartedEscapedPrefixesTextOfNextInput()
+{
+    const char* input1 = "\\nprefix";
+    const char* input2 = "suffix token";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "\nprefixsuffix");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 1);
+    TEST_SPAN(1, 1, 1, 14);
+    return 0;
+}
+
+static int TextAtEofBecomesNextTokenWhenNextInputStartsWithSpace()
+{
+    const char* input1 = "token1";
+    const char* input2 = " token2";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 6);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    return 0;
+}
+
+static int TextAtEofBecomesNextTokenWhenNextInputStartsWithTab()
+{
+    const char* input1 = "token1";
+    const char* input2 = "\ttoken2";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "token1");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 6);
+    return 0;
+}
+
+static int TextAtEofBecomesNextTokenWhenNextInputStartsWithNewline()
+{
+    const char* input1 = "token1";
+    const char* input2 = "\ntoken2";
+    const size_t len1 = strlen(input1);
+    const size_t len2 = strlen(input2);
+
+    SimpleLexer_SetInput(&lexer, input1, len1);
+    (void) SimpleLexer_GetNextToken(&lexer, &token);
+    SimpleLexer_SetInput(&lexer, input2, len2);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "token1");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 6);
+    return 0;
+}
+
+static int TwoUnquotedTokens()
+{
+    const char *input = "token1 token2";
+    const size_t len = strlen(input);
+
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_ASSERT_STREQ(token.text, "token1");
+    TEST_ASSERT_EQUAL(token.quoted, 0);
+    TEST_ASSERT_EQUAL(token.startedEscaped, 0);
+    TEST_SPAN(1, 1, 1, 6);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -149,17 +333,18 @@ static int TestSimpleLexer_TwoUnquotedTokens()
     return 0;
 }
 
-static int TestSimpleLexer_TwoTokens_FirstQuoted()
+static int TwoTokens_FirstQuoted()
 {
     const char *input = "\"token1\" token2";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 1);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 8);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -169,18 +354,19 @@ static int TestSimpleLexer_TwoTokens_FirstQuoted()
     return 0;
 }
 
-static int TestSimpleLexer_TwoTokens_SecondQuoted()
+static int TwoTokens_SecondQuoted()
 {
     const char *input = "token1 \"token2\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 6);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -190,18 +376,19 @@ static int TestSimpleLexer_TwoTokens_SecondQuoted()
     return 0;
 }
 
-static int TestSimpleLexer_TwoQuotedTokens_WithSpace()
+static int TwoQuotedTokens_WithSpace()
 {
     const char *input = "\"token1\" \"token2\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 1);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 8);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -211,18 +398,19 @@ static int TestSimpleLexer_TwoQuotedTokens_WithSpace()
     return 0;
 }
 
-static int TestSimpleLexer_TwoQuotedTokens_Adjacent()
+static int TwoQuotedTokens_Adjacent()
 {
     const char *input = "\"token1\"\"token2\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 1);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 8);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -232,17 +420,19 @@ static int TestSimpleLexer_TwoQuotedTokens_Adjacent()
     return 0;
 }
 
-static int TestSimpleLexer_TwoTokens_FirstQuoted_Adjacent()
+static int TwoTokens_FirstQuoted_Adjacent()
 {
     const char *input = "\"token1\"token2";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 1);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 8);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -252,18 +442,19 @@ static int TestSimpleLexer_TwoTokens_FirstQuoted_Adjacent()
     return 0;
 }
 
-static int TestSimpleLexer_TwoTokens_SecondQuoted_Adjacent()
+static int TwoTokens_SecondQuoted_Adjacent()
 {
     const char *input = "token1\"token2\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 6);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -273,12 +464,13 @@ static int TestSimpleLexer_TwoTokens_SecondQuoted_Adjacent()
     return 0;
 }
 
-static int TestSimpleLexer_UnquotedTokenWithEscapedInnerQuotationMark()
+static int UnquotedTokenWithEscapedInnerQuotationMark()
 {
     const char *input = "token\\\"token";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token\"token");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -288,13 +480,14 @@ static int TestSimpleLexer_UnquotedTokenWithEscapedInnerQuotationMark()
     return 0;
 }
 
-static int TestSimpleLexer_QuotedTokenWithEscapedInnerQuotationMark()
+static int QuotedTokenWithEscapedInnerQuotationMark()
 {
     const char *input = "\"token\\\"token\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token\"token");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -304,13 +497,14 @@ static int TestSimpleLexer_QuotedTokenWithEscapedInnerQuotationMark()
     return 0;
 }
 
-static int TestSimpleLexer_QuotedTokenWithEmbeddedNewline()
+static int QuotedTokenWithEmbeddedNewline()
 {
     const char *input = "\"token\ntoken\"";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
     TEST_ASSERT_STREQ(token.text, "token\ntoken");
     TEST_ASSERT_EQUAL(token.quoted, 1);
@@ -320,22 +514,23 @@ static int TestSimpleLexer_QuotedTokenWithEmbeddedNewline()
     return 0;
 }
 
-static int TestSimpleLexer_TokenSequenceWithQuotedTokenWithEmbeddedNewline()
+static int TokenSequenceWithQuotedTokenWithEmbeddedNewline()
 {
     const char *input = "token1 \"token2\ntoken2\" token3";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 6);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2\ntoken2");
     TEST_ASSERT_EQUAL(token.quoted, 1);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 8, 2, 7);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token3");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -345,12 +540,13 @@ static int TestSimpleLexer_TokenSequenceWithQuotedTokenWithEmbeddedNewline()
     return 0;
 }
 
-static int TestSimpleLexer_LeadingWhitespace()
+static int LeadingWhitespace()
 {
     const char *input = " \t\n token";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -360,33 +556,35 @@ static int TestSimpleLexer_LeadingWhitespace()
     return 0;
 }
 
-static int TestSimpleLexer_TrailingWhitespace()
+static int TrailingWhitespace()
 {
     const char *input = "token \t\n ";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 5);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
 
     return 0;
 }
 
-static int TestSimpleLexer_MiddleWhitespace()
+static int MiddleWhitespace()
 {
     const char *input = "token1 \t\n\t\n\t token2";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(1, 1, 1, 6);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -396,33 +594,35 @@ static int TestSimpleLexer_MiddleWhitespace()
     return 0;
 }
 
-static int TestSimpleLexer_LeadingTrailingAndMiddleWhitespace()
+static int LeadingTrailingAndMiddleWhitespace()
 {
     const char *input = " \t\n token1 \t\n\t\n\t token2 \t\n\t ";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token1");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(2, 2, 2, 7);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_OK);
+    TEST_GET_TOKEN(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "token2");
     TEST_ASSERT_EQUAL(token.quoted, 0);
     TEST_ASSERT_EQUAL(token.startedEscaped, 0);
     TEST_SPAN(4, 3, 4, 8);
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_EOF);
 
     return 0;
 }
 
-static int TestSimpleLexer_TokenStartedEscaped()
+static int TokenStartedEscaped()
 {
     const char *input = "\\mytoken";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "mytoken");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -432,12 +632,13 @@ static int TestSimpleLexer_TokenStartedEscaped()
     return 0;
 }
 
-static int TestSimpleLexer_CEscapeCharactersProduceAsciiEquivalents()
+static int CEscapeCharactersProduceAsciiEquivalents()
 {
     const char *input = "\\a\\b\\f\\n\\r\\t\\v";
     const size_t len = strlen(input);
 
-    TEST_GET_TOKEN(input, len, SIMPLE_LEXER_EOF);
+    SimpleLexer_SetInput(&lexer, input, len);
+    TEST_GET_TOKEN(SIMPLE_LEXER_EOF);
     TEST_FINISH(SIMPLE_LEXER_OK);
     TEST_ASSERT_STREQ(token.text, "\a\b\f\n\r\t\v");
     TEST_ASSERT_EQUAL(token.quoted, 0);
@@ -456,28 +657,38 @@ typedef struct Test
 #define REGISTER_TEST(name) { #name, name }
 
 static Test tests[] = {
-    REGISTER_TEST(TestSimpleLexer_Empty),
-    REGISTER_TEST(TestSimpleLexer_OneUnquotedToken),
-    REGISTER_TEST(TestSimpleLexer_LexAfterFinishReturnsEof),
-    REGISTER_TEST(TestSimpleLexer_FinishAfterFinishReturnsEof),
-    REGISTER_TEST(TestSimpleLexer_TwoUnquotedTokens),
-    REGISTER_TEST(TestSimpleLexer_TwoTokens_FirstQuoted),
-    REGISTER_TEST(TestSimpleLexer_TwoTokens_SecondQuoted),
-    REGISTER_TEST(TestSimpleLexer_TwoQuotedTokens_WithSpace),
-    REGISTER_TEST(TestSimpleLexer_TwoQuotedTokens_Adjacent),
-    REGISTER_TEST(TestSimpleLexer_TwoTokens_FirstQuoted_Adjacent),
-    REGISTER_TEST(TestSimpleLexer_TwoTokens_SecondQuoted_Adjacent),
-    REGISTER_TEST(TestSimpleLexer_UnquotedTokenWithEscapedInnerQuotationMark),
-    REGISTER_TEST(TestSimpleLexer_QuotedTokenWithEscapedInnerQuotationMark),
-    REGISTER_TEST(TestSimpleLexer_QuotedTokenWithEmbeddedNewline),
-    REGISTER_TEST(TestSimpleLexer_TokenSequenceWithQuotedTokenWithEmbeddedNewline),
-    REGISTER_TEST(TestSimpleLexer_LeadingWhitespace),
-    REGISTER_TEST(TestSimpleLexer_TrailingWhitespace),
-    REGISTER_TEST(TestSimpleLexer_MiddleWhitespace),
-    REGISTER_TEST(TestSimpleLexer_LeadingTrailingAndMiddleWhitespace),
-    REGISTER_TEST(TestSimpleLexer_TokenStartedEscaped),
-    REGISTER_TEST(TestSimpleLexer_CEscapeCharactersProduceAsciiEquivalents),
-    { NULL, NULL }
+    REGISTER_TEST(Empty),
+    REGISTER_TEST(OneUnquotedToken),
+    REGISTER_TEST(LexAfterFinishReturnsEof),
+    REGISTER_TEST(SettingNewInputAfterFinishMakesLexReturnEof),
+    REGISTER_TEST(FinishAfterFinishReturnsEof),
+    REGISTER_TEST(SettingTwoDifferentInputsUsesTheSecondInput),
+    REGISTER_TEST(SettingInputAfterParsingPartOfAnotherDiscardsUnusedInput),
+    REGISTER_TEST(ParserStaysAtCurrentLineAndColumnAfterSettingInput),
+    REGISTER_TEST(UnquotedTextAtEofPrefixesTextOfNextInput),
+    REGISTER_TEST(QuotedTextAtEofPrefixesTextOfNextInput),
+    REGISTER_TEST(TextAtEofThatStartedEscapedPrefixesTextOfNextInput),
+    REGISTER_TEST(TextAtEofBecomesNextTokenWhenNextInputStartsWithSpace),
+    REGISTER_TEST(TextAtEofBecomesNextTokenWhenNextInputStartsWithTab),
+    REGISTER_TEST(TextAtEofBecomesNextTokenWhenNextInputStartsWithNewline),
+    REGISTER_TEST(TwoUnquotedTokens),
+    REGISTER_TEST(TwoTokens_FirstQuoted),
+    REGISTER_TEST(TwoTokens_SecondQuoted),
+    REGISTER_TEST(TwoQuotedTokens_WithSpace),
+    REGISTER_TEST(TwoQuotedTokens_Adjacent),
+    REGISTER_TEST(TwoTokens_FirstQuoted_Adjacent),
+    REGISTER_TEST(TwoTokens_SecondQuoted_Adjacent),
+    REGISTER_TEST(UnquotedTokenWithEscapedInnerQuotationMark),
+    REGISTER_TEST(QuotedTokenWithEscapedInnerQuotationMark),
+    REGISTER_TEST(QuotedTokenWithEmbeddedNewline),
+    REGISTER_TEST(TokenSequenceWithQuotedTokenWithEmbeddedNewline),
+    REGISTER_TEST(LeadingWhitespace),
+    REGISTER_TEST(TrailingWhitespace),
+    REGISTER_TEST(MiddleWhitespace),
+    REGISTER_TEST(LeadingTrailingAndMiddleWhitespace),
+    REGISTER_TEST(TokenStartedEscaped),
+    REGISTER_TEST(CEscapeCharactersProduceAsciiEquivalents),
+    { NULL, NULL },
 };
 
 int main(int argc, char **argv)

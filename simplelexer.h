@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Jordan Vaughan
+ * Copyright (c) 2019 Jordan Vaughan
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -78,19 +78,19 @@ typedef struct SimpleToken {
  * Copy `source` into `dest`.
  * This allocates memory for `dest`'s text buffer
  * using the standard library's malloc().
- * Pass dest to SimpleToken_Destroy() to free dest's text buffer.
+ * Pass `dest` to SimpleToken_Destroy() to free `dest`'s text buffer.
  *
  * This returns zero if the copy succeeded and nonzero if malloc() failed.
  */
 extern int SimpleToken_Copy(
-    const SimpleToken *restrict source,
-    SimpleToken *restrict dest);
+    const SimpleToken* restrict source,
+    SimpleToken* restrict dest);
 
 /*
  * Deallocate a SimpleToken's text buffer but not the SimpleToken itself.
  * This frees the token's text buffer using the standard library's free().
  */
-extern void SimpleToken_Destroy(SimpleToken *token);
+extern void SimpleToken_Destroy(SimpleToken* token);
 
 /*
  * Allocate a new SimpleToken that is a copy of the given token.
@@ -99,14 +99,14 @@ extern void SimpleToken_Destroy(SimpleToken *token);
  *
  * This returns the new token or NULL if malloc() failed.
  */
-extern SimpleToken *SimpleToken_Duplicate(const SimpleToken *source);
+extern SimpleToken* SimpleToken_Duplicate(const SimpleToken* source);
 
 /*
  * Deallocate a SimpleToken created by SimpleToken_Duplicate().
  * This frees both the token structure itself and its text buffer
  * using the standard library's free().
  */
-extern void SimpleToken_Free(SimpleToken *token);
+extern void SimpleToken_Free(SimpleToken* token);
 
 /*
  * This is a simple lexer that produces SimpleTokens.  A token is a sequence of
@@ -142,10 +142,15 @@ typedef struct SimpleLexer
                                    with an escaped character */
     char finished;              /* set if lexer finished its stream */
 
-    char* buffer;           /* token text buffer
-                               (not owned by the lexer) */
-    size_t bufferLength;    /* current token length */
-    size_t bufferCapacity;  /* token text buffer's byte size */
+    char* buffer;               /* token text buffer
+                                   (not owned by the lexer) */
+    size_t bufferLength;        /* current token length */
+    size_t bufferCapacity;      /* token text buffer's byte size */
+
+    const char* input;          /* current text input supplied by user
+                                   (not owned by the lexer) */
+    size_t inputSize;           /* size of current text input in chars */
+    size_t inputIndex;          /* lexer's current location in text input */
 } SimpleLexer;
 
 /*
@@ -186,28 +191,31 @@ typedef enum SimpleLexerError {
  * `tokenBufferSize` should be 1024.
  */
 extern void SimpleLexer_Init(
-    SimpleLexer *restrict lexer,
-    char *restrict tokenBuffer,
+    SimpleLexer* restrict lexer,
+    char* restrict tokenBuffer,
     size_t tokenBufferSize);
 
 /*
- * Get the next token from the specified string
- * starting at the specified `index`.
- *
- * This function updates the value stored at `index` as it scans the string.
- * Pass the `source` string and this `index` value to the function repeatedly
- * to get subsequent tokens.  You can modify the value stored at `index`
- * (to reset the stream, for example).
+ * Give the parser a line of text to parse.  The parameters MUST NOT be NULL.
+ * Afterwards, call SimpleLexer_GetNextToken() repeatedly to lex tokens.
+ */
+extern void SimpleLexer_SetInput(
+    SimpleLexer* restrict lexer,
+    const char* restrict text,
+    size_t textSize);
+
+/*
+ * Get the next token.
  *
  * This function returns SIMPLE_LEXER_OK if it successfully lexed a token,
- * which is stored in the `token` parameter.
+ * which is stored in the `outToken` parameter.
  * Note that this token should NOT be passed to
  * SimpleToken_Free() or SimpleToken_Destroy().
  * The token's text buffer is the same buffer that was given to the lexer
  * when the lexer was initialized with SimpleLexer_Init().
  *
  * This function returns SIMPLE_LEXER_EOF when the lexer reaches the end of
- * the string (that is, when `index` >= `sourceSize`) even when there is
+ * the string that was given to SimpleLexer_SetInput() even when there is
  * a token at the end of the string.  This makes it possible for callers to lex
  * tokens from streams of text.  When the stream is finished, call
  * SimpleLexer_Finish() to get the final token, if any.
@@ -218,28 +226,22 @@ extern void SimpleLexer_Init(
  *       for the lexer's text buffer.
  */
 extern SimpleLexerError SimpleLexer_GetNextToken(
-    SimpleLexer *restrict lexer,
-    const char *restrict source,
-    size_t sourceSize,
-    size_t *restrict index,
-    SimpleToken *restrict token);
+    SimpleLexer* restrict lexer,
+    SimpleToken* restrict outToken);
 
 /*
  * Get the final token, if any, and shut down the lexer,
  * preventing its use in future SimpleLexer_GetNextToken()
  * and SimpleLexer_Finish() calls.
  *
- * Lexers passed to this function can be reset by passing them
- * to SimpleLexer_Init().
+ * You can reset finished lexers by passing them to SimpleLexer_Init().
  *
- * This function returns SIMPLE_LEXER_OK if there is a final token,
- * which is stored in the `finalToken` parameter.
- * Note that this token should NOT be passed to
- * SimpleToken_Free() or SimpleToken_Destroy().
- * The token's text buffer is the same buffer that was given to the lexer
- * when the lexer was initialized with SimpleLexer_Init().
+ * Return SIMPLE_LEXER_OK if the function stores the lexer's final token
+ * in the `finalToken` parameter.  Note that this token should NOT be passed to
+ * SimpleToken_Free() or SimpleToken_Destroy().  The token's text buffer is
+ * the same one that was passed to SimpleLexer_Init().
  *
- * This function returns SIMPLE_LEXER_EOF when there is no final token.
+ * Return SIMPLE_LEXER_EOF if there is no final token.
  * In this case, `finalToken` is untouched.
  *
  * Other return codes:
@@ -251,8 +253,8 @@ extern SimpleLexerError SimpleLexer_GetNextToken(
  *       that wasn't closed with quotation marks ('"').
  */
 extern SimpleLexerError SimpleLexer_Finish(
-    SimpleLexer *restrict lexer,
-    SimpleToken *restrict finalToken);
+    SimpleLexer* restrict lexer,
+    SimpleToken* restrict finalToken);
 
 #ifdef __cplusplus
 }
