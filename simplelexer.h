@@ -28,7 +28,10 @@
 #define __SIMPLELEXER_H
 
 #ifdef __cplusplus
+#define SIMPLELEXER_RESTRICT __restrict
 extern "C" {
+#else
+#define SIMPLELEXER_RESTRICT restrict
 #endif
 
 #include <stddef.h>
@@ -83,8 +86,8 @@ typedef struct SimpleToken {
  * This returns zero if the copy succeeded and nonzero if malloc() failed.
  */
 extern int SimpleToken_Copy(
-    const SimpleToken* restrict source,
-    SimpleToken* restrict dest);
+    const SimpleToken* SIMPLELEXER_RESTRICT source,
+    SimpleToken* SIMPLELEXER_RESTRICT dest);
 
 /*
  * Deallocate a SimpleToken's text buffer but not the SimpleToken itself.
@@ -191,8 +194,8 @@ typedef enum SimpleLexerError {
  * `tokenBufferSize` should be 1024.
  */
 extern void SimpleLexer_Init(
-    SimpleLexer* restrict lexer,
-    char* restrict tokenBuffer,
+    SimpleLexer* SIMPLELEXER_RESTRICT lexer,
+    char* SIMPLELEXER_RESTRICT tokenBuffer,
     size_t tokenBufferSize);
 
 /*
@@ -200,8 +203,8 @@ extern void SimpleLexer_Init(
  * Afterwards, call SimpleLexer_GetNextToken() repeatedly to lex tokens.
  */
 extern void SimpleLexer_SetInput(
-    SimpleLexer* restrict lexer,
-    const char* restrict text,
+    SimpleLexer* SIMPLELEXER_RESTRICT lexer,
+    const char* SIMPLELEXER_RESTRICT text,
     size_t textSize);
 
 /*
@@ -226,8 +229,8 @@ extern void SimpleLexer_SetInput(
  *       for the lexer's text buffer.
  */
 extern SimpleLexerError SimpleLexer_GetNextToken(
-    SimpleLexer* restrict lexer,
-    SimpleToken* restrict outToken);
+    SimpleLexer* SIMPLELEXER_RESTRICT lexer,
+    SimpleToken* SIMPLELEXER_RESTRICT outToken);
 
 /*
  * Get the final token, if any, and shut down the lexer,
@@ -253,8 +256,8 @@ extern SimpleLexerError SimpleLexer_GetNextToken(
  *       that wasn't closed with quotation marks ('"').
  */
 extern SimpleLexerError SimpleLexer_Finish(
-    SimpleLexer* restrict lexer,
-    SimpleToken* restrict finalToken);
+    SimpleLexer* SIMPLELEXER_RESTRICT lexer,
+    SimpleToken* SIMPLELEXER_RESTRICT finalToken);
 
 #ifdef __cplusplus
 }

@@ -220,7 +220,6 @@ SimpleLexerError SimpleLexer_GetNextToken(
     SimpleToken* restrict outToken)
 {
     char c;
-    int error;
 
     assert(lexer != NULL);
     assert(lexer->buffer != NULL);

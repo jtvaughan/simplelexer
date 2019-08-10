@@ -657,7 +657,7 @@ typedef struct Test
 #define REGISTER_TEST(name) { #name, name }
 
 static Test tests[] = {
-    REGISTER_TEST(Empty),
+    REGISTER_TEST(EmptyInputYieldsEofAndNoTokens),
     REGISTER_TEST(OneUnquotedToken),
     REGISTER_TEST(LexAfterFinishReturnsEof),
     REGISTER_TEST(SettingNewInputAfterFinishMakesLexReturnEof),
