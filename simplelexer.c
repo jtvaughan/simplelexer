@@ -261,8 +261,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
                 default: decodedChar = c; break;
             }
 
-            if (SimpleLexer_AppendToBuffer(lexer, decodedChar)) {
-                SimpleLexer_FinishToken(lexer, outToken, 0);
+            if (SimpleLexer_AppendToBuffer(lexer, decodedChar))
+            {
                 return SIMPLE_LEXER_TOKEN_TOO_LARGE;
             }
             lexer->escaping = 0;
@@ -273,8 +273,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
             {
                 if (lexer->tokenIsQuoted)
                 {
-                    if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                        SimpleLexer_FinishToken(lexer, outToken, 0);
+                    if (SimpleLexer_AppendToBuffer(lexer, c))
+                    {
                         return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                     }
                 }
@@ -293,8 +293,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
             {
                 if (lexer->tokenIsQuoted)
                 {
-                    if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                        SimpleLexer_FinishToken(lexer, outToken, 0);
+                    if (SimpleLexer_AppendToBuffer(lexer, c))
+                    {
                         return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                     }
                 }
@@ -340,8 +340,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
         {
             if (lexer->inToken && lexer->tokenIsQuoted)
             {
-                if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                    SimpleLexer_FinishToken(lexer, outToken, 0);
+                if (SimpleLexer_AppendToBuffer(lexer, c))
+                {
                     return SIMPLE_LEXER_TOKEN_TOO_LARGE;
                 }
             }
@@ -363,8 +363,8 @@ SimpleLexerError SimpleLexer_GetNextToken(
             {
                 SimpleLexer_StartToken(lexer, 0, 0);
             }
-            if (SimpleLexer_AppendToBuffer(lexer, c)) {
-                SimpleLexer_FinishToken(lexer, outToken, 0);
+            if (SimpleLexer_AppendToBuffer(lexer, c))
+            {
                 return SIMPLE_LEXER_TOKEN_TOO_LARGE;
             }
         }
